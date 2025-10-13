@@ -134,7 +134,7 @@ def main():
         
         # Update local installation
         print("🔄 Updating local installation...")
-        subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'airobo'])
+        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "airobo"], check=True)
         
         print()
         print("=" * 50)

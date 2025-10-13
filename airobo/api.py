@@ -1,12 +1,11 @@
 """
 API callbacks!
 """
-import os
-import re
 
 # Declarations / modules
 from airobo.modules.publishAndroid import publish_android
 from airobo.modules.publishIOS import publish_ios
+from airobo.modules.getLatestAppSource import get_app_for_publishing
 
 # ======================================================================================
 
@@ -16,49 +15,36 @@ Simulate publishing something.
 def publish(plat=None):
     if plat != "ios" and plat != "android" and plat != None:
         return "Supply a valid platform type!"
+    
+    # First, get the latest app source (only once)
+    print("📦 Getting latest app source for publishing...")
+    source_result = get_app_for_publishing()
+    
+    if not source_result["success"]:
+        print(f"❌ Failed to get app source: {source_result['message']}")
+        return {"success": False, "message": "Failed to get app source"}
+    
+    app_path = source_result["local_path"]
+    
+    # Now publish to the specified platform(s)
     if plat == "ios":
-        publish_ios()
+        publish_ios(app_path)
     elif plat == "android":
-        publish_android()
+        publish_android(app_path)
     else:                       #default : publish all.
-        publish_ios()
-        publish_android()
+        publish_ios(app_path)
+        publish_android(app_path)
 
 #----------------------------------------
 
 """
-Get version from pyproject.toml
+Get version from package metadata
 """
 def version():
     try:
-        # First try to get the directory where this file is located
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # Try multiple possible locations for pyproject.toml
-        possible_paths = [
-            # In development: go up one level from airobo/ to project root
-            os.path.join(os.path.dirname(current_dir), 'pyproject.toml'),
-            # Alternative: same directory as this file
-            os.path.join(current_dir, 'pyproject.toml'),
-            # Alternative: current working directory
-            os.path.join(os.getcwd(), 'pyproject.toml')
-        ]
-        
-        for toml_path in possible_paths:
-            if os.path.exists(toml_path):
-                with open(toml_path, 'r') as f:
-                    content = f.read()
-                    # Extract version using regex
-                    version_match = re.search(r'version\s*=\s*["\']([^"\']+)["\']', content)
-                    if version_match:
-                        print(version_match.group(1))
-                        return
-        
-        # If no file found, fallback
-        print("0.1.7")  # Use current known version as fallback
-    except Exception as e:
-        # Fallback on any error
-        print("0.1.7")
+        import importlib.metadata
+        # Get version from installed package metadata
+        print(importlib.metadata.version('airobo'))
     except Exception:
-        # Fallback on any error
-        print("1337")
+        # Fallback if package not installed or other error
+        print("0.1.10")
