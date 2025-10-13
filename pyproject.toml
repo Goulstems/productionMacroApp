@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "airobo"
-version = "0.1.28"
+version = "0.1.50"
 description = "A CLI tool for Airobo tasks"
 authors = [
     { name="Joshua Morvant", email="joshua@aiarobo.com" }

@@ -53,16 +53,86 @@ def build_android_bundle(app_path):
         
         # Clean and build
         print("Cleaning previous builds...")
-        if os.name == 'nt':  # Windows
-            subprocess.run(["gradlew.bat", "clean"], check=True, shell=True)
-        else:  # macOS/Linux
-            subprocess.run(["./gradlew", "clean"], check=True)
+        gradle_cmd = "gradlew.bat" if os.name == 'nt' else "./gradlew"
+        
+        # Stop any running Gradle daemons first
+        try:
+            subprocess.run([gradle_cmd, "--stop"], 
+                          cwd=android_path, 
+                          shell=(os.name == 'nt'),
+                          stdout=subprocess.DEVNULL, 
+                          stderr=subprocess.DEVNULL)
+        except:
+            pass  # Ignore if daemon stop fails
+        
+        # Try Gradle clean first
+        try:
+            subprocess.run([gradle_cmd, "clean"], 
+                          cwd=android_path, 
+                          check=True, 
+                          shell=(os.name == 'nt'),
+                          stdout=subprocess.DEVNULL, 
+                          stderr=subprocess.DEVNULL)
+            print("✅ Clean completed")
+        except subprocess.CalledProcessError:
+            print("⚠️ Gradle clean failed, attempting force clean...")
+            
+            # Force clean by manually deleting build directories
+            import shutil
+            import time
+            
+            build_dirs = [
+                os.path.join(android_path, "app", "build"),
+                os.path.join(android_path, "build"),
+                os.path.join(android_path, ".gradle")
+            ]
+            
+            for build_dir in build_dirs:
+                if os.path.exists(build_dir):
+                    try:
+                        # Wait a moment and try to delete
+                        time.sleep(1)
+                        shutil.rmtree(build_dir, ignore_errors=True)
+                        print(f"🗑️ Removed {os.path.basename(build_dir)} directory")
+                    except Exception as e:
+                        print(f"⚠️ Could not remove {os.path.basename(build_dir)}: {str(e)[:50]}...")
+            
+            print("✅ Force clean completed")
         
         print("Building release bundle...")
-        if os.name == 'nt':  # Windows
-            subprocess.run(["gradlew.bat", "bundleRelease"], check=True, shell=True)
-        else:  # macOS/Linux
-            subprocess.run(["./gradlew", "bundleRelease"], check=True)
+        
+        # Ensure Android SDK is configured
+        _ensure_android_sdk_config(android_path)
+        
+        # Run Gradle with real-time output filtering
+        gradle_cmd = "gradlew.bat" if os.name == 'nt' else "./gradlew"
+        
+        # Run Gradle build and capture all output for error analysis
+        result = subprocess.run(
+            [gradle_cmd, "bundleRelease"],
+            cwd=android_path,
+            capture_output=True,
+            text=True,
+            shell=(os.name == 'nt')
+        )
+        
+        if result.returncode != 0:
+            print("❌ Build failed! Error details:")
+            print("STDOUT:")
+            print(result.stdout)
+            print("\nSTDERR:")
+            print(result.stderr)
+            raise subprocess.CalledProcessError(result.returncode, gradle_cmd)
+        else:
+            # Show only success-related output on successful build
+            lines = result.stdout.split('\n')
+            for line in lines:
+                line = line.strip()
+                if 'BUILD SUCCESSFUL' in line or '%' in line or 'bundleRelease' in line:
+                    print(f"  {line}")
+            print("✅ Build completed successfully!")
+        
+        print("✅ Build completed successfully!")
         
         # Find and copy the generated .aab file
         default_aab_path = os.path.join(android_path, "app/build/outputs/bundle/release/app-release.aab")
@@ -216,3 +286,42 @@ def create_build_output_dir(app_path):
     
     print(f"Build output directory: {build_dir}")
     return build_dir
+
+def _ensure_android_sdk_config(android_path):
+    """
+    Ensure Android SDK is properly configured by creating local.properties file
+    """
+    local_properties_path = os.path.join(android_path, "local.properties")
+    
+    # Try to find Android SDK location
+    android_home = None
+    
+    # Check environment variable first
+    android_home = os.environ.get('ANDROID_HOME')
+    
+    if not android_home:
+        # Try common Windows locations
+        common_paths = [
+            os.path.expanduser("~/AppData/Local/Android/Sdk"),
+            "C:/Users/%s/AppData/Local/Android/Sdk" % os.getlogin(),
+            "C:/Android/Sdk",
+            "C:/Program Files/Android/Sdk",
+            "C:/Program Files (x86)/Android/Sdk"
+        ]
+        
+        for path in common_paths:
+            if os.path.exists(path):
+                android_home = path.replace("\\", "/")
+                break
+    
+    if android_home:
+        # Create or update local.properties
+        with open(local_properties_path, 'w') as f:
+            f.write(f"sdk.dir={android_home}\n")
+        print(f"✅ Android SDK configured: {android_home}")
+    else:
+        print("⚠️ Android SDK not found. Please install Android Studio or set ANDROID_HOME")
+        print("   Download from: https://developer.android.com/studio")
+
+
+

@@ -5,6 +5,7 @@ Shared Capacitor Build Module
 import subprocess
 import os
 
+
 def prepare_capacitor_app(app_path):
     print("Preparing Capacitor app...")
     
@@ -13,10 +14,14 @@ def prepare_capacitor_app(app_path):
         os.chdir(app_path)
         
         print("Installing dependencies...")
-        subprocess.run(["npm", "install"], check=True, capture_output=True, shell=True)
+        # Run npm install silently
+        subprocess.run(["npm", "install"], check=True, shell=True, 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         print("Building web assets...")
-        subprocess.run(["npm", "run", "build"], check=True, capture_output=True, shell=True)
+        # Run npm build silently  
+        subprocess.run(["npm", "run", "build"], check=True, shell=True,
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         print("Capacitor app prepared")
         return True
@@ -34,7 +39,8 @@ def sync_platform(app_path, platform):
         original_dir = os.getcwd()
         os.chdir(app_path)
         
-        subprocess.run(["npx", "cap", "sync", platform], check=True, capture_output=True, shell=True)
+        subprocess.run(["npx", "cap", "sync", platform], check=True, shell=True,
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         print(f"{platform} sync completed")
         return True
