@@ -3,8 +3,8 @@ API callbacks!
 """
 
 # Declarations / modules
-from airobo.modules.publishAndroid import publish_android
-from airobo.modules.publishIOS import publish_ios
+from airobo.modules.android.publishAndroid import publish_android
+from airobo.modules.ios.publishIOS import publish_ios
 from airobo.modules.getLatestAppSource import get_app_for_publishing
 
 # ======================================================================================
