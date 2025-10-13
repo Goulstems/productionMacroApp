@@ -17,7 +17,17 @@ def publish(plat=None):
         return "Supply a valid platform type!"
     
     # First, get the latest app source (only once)
-    print("📦 Getting latest app source for publishing...")
+    print("=======================================")
+    print("""
+  ___  ___________ ___________  _____ 
+ / _ \|_   _| ___ \  _  | ___ \|  _  |
+/ /_\ \ | | | |_/ / | | | |_/ /| | | |
+|  _  | | | |    /| | | | ___ \| | | |
+| | | |_| |_| |\ \\ \_/ / |_/ /\ \_/ /
+\_| |_/\___/\_| \_|\___/\____/  \___/ 
+
+[PUBLISHING]..                                      
+""")
     source_result = get_app_for_publishing()
     
     if not source_result["success"]:
