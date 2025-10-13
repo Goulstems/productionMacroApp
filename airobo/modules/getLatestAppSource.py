@@ -140,7 +140,7 @@ def clone_or_pull_repo(repo_url, local_path, branch="main"):
         
         if local_path.exists() and (local_path / '.git').exists():
             # Repository already exists, pull latest changes
-            print(f"\t📂 PULLING...")
+            print(f"\t> PULLING...")
             return pull_latest_changes(local_path, branch)
         else:
             # Repository doesn't exist, clone it
@@ -164,7 +164,7 @@ def clone_repository(repo_url, local_path, branch="main"):
         cmd = ["git", "clone", "-b", branch, repo_url, str(local_path)]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         
-        print(f"\t✅ Successfully cloned repository to {local_path}")
+        print(f"\t- Successfully cloned repository to {local_path}")
         return {
             "success": True,
             "message": f"Repository cloned successfully to {local_path}",
@@ -200,7 +200,7 @@ def pull_latest_changes(local_path, branch="main"):
         # Return to original directory
         os.chdir(original_cwd)
         
-        print(f"\t\t✅ Successfully pulled latest changes!")
+        print(f"\t\t- Successfully pulled latest changes!")
         
         return {
             "success": True,
@@ -241,10 +241,10 @@ def get_app_source(repo_url, project_name=None, branch="main", base_path=None):
         # Construct local path in cache directory
         local_path = Path(base_path) / project_name
         
-        print(f"\t> Getting latest source:")
-        print(f"\t\t> Repository:\t{repo_url}")
-        print(f"\t\t>    ...Branch:\t\t~{branch}")
-        print(f"\t-----\n\t--> Cache path: {local_path}\n\t-----")
+        print(f"\t-----")
+        print(f"\t\t- Repository:\t{repo_url}")
+        print(f"\t\t-    ...Branch:\t\t~{branch}")
+        print(f"\n\t\t--> Cache path: {local_path}\n\t-----")
         print()
         
         # Clone or pull the repository
@@ -256,7 +256,7 @@ def get_app_source(repo_url, project_name=None, branch="main", base_path=None):
             result["cache_path"] = str(local_path)  # Specific path for cached content
             
             # Print success message with formatting
-            print(f"\t- - - - -\n\t✅ App source ready at: {local_path}\n\t- - - - -")
+            print(f"\t- - - - -\n\tAPP SOURCE READY AT: {local_path}\n\t- - - - -")
         
         return result
         
