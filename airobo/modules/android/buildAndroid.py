@@ -132,7 +132,14 @@ def build_android_bundle(app_path):
     print("🔄 Syncing to Android...")
     if not sync_platform(app_path, "android"):
         print("❌ Android sync failed")
-        return None
+        # Try to recover by creating necessary files
+        android_dir_path = Path(app_path) / "android"
+        if android_dir_path.exists():
+            print("🔧 Android directory exists, trying to recover...")
+            _ensure_android_manifest_exists(android_dir_path)
+        else:
+            print("❌ Android directory missing, sync completely failed")
+            return None
     
     android_dir = os.path.join(app_path, "android")
     
@@ -154,6 +161,9 @@ def build_android_bundle(app_path):
     
     # Get the .aab file path before building
     expected_aab_path = os.path.join(android_dir, "app", "build", "outputs", "bundle", "release", "app-release.aab")
+    
+    # CRITICAL: Ensure AndroidManifest.xml exists before any modifications
+    _ensure_android_manifest_exists(Path(android_dir))
     
     # Ensure applicationId and manifest provider authorities are aligned with Play package
     _ensure_application_id(Path(android_dir))
@@ -228,6 +238,68 @@ def _read_text_safe(p: Path) -> str:
         except Exception:
             return ""
 
+def _ensure_android_manifest_exists(android_dir: Path) -> None:
+    """Ensure AndroidManifest.xml exists before building."""
+    manifest_path = android_dir / "app" / "src" / "main" / "AndroidManifest.xml"
+    
+    if not manifest_path.exists():
+        print("⚠️ AndroidManifest.xml missing! Creating basic manifest...")
+        
+        # Ensure the directory exists
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Create a basic AndroidManifest.xml
+        basic_manifest = '''<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme.NoActionBarLaunch">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/AppTheme.NoActionBarLaunch">
+
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+    </application>
+
+    <!-- Permissions -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+</manifest>'''
+        
+        try:
+            manifest_path.write_text(basic_manifest, encoding='utf-8')
+            print(f"✅ Created AndroidManifest.xml: {manifest_path}")
+        except Exception as e:
+            print(f"❌ Failed to create AndroidManifest.xml: {e}")
+            raise
+    else:
+        print(f"✅ AndroidManifest.xml exists: {manifest_path}")
+
+
 def _ensure_application_id(android_dir: Path) -> None:
     """Force applicationId to match Play Console package name.
     Controlled by env AIROBO_ANDROID_APPLICATION_ID (defaults to com.aiaroboacademy.app).
@@ -288,6 +360,147 @@ def _align_manifest_package(android_dir: Path) -> None:
     if new_xml != xml:
         manifest.write_text(new_xml, encoding="utf-8")
         print(f"🏷️ Manifest package aligned to: {target_app_id}")
+
+def _override_android12_splash_screen(android_dir, source_splash):
+    """
+    MEGA NUCLEAR OPTION: Override Android 12+ Splash Screen API completely
+    This forcibly disables the new splash screen API and forces our custom splash
+    """
+    print("🔥 OVERRIDING Android 12+ Splash Screen API...")
+    
+    # 1. Create themes.xml specifically for Android 12+
+    res_dir = android_dir / "app" / "src" / "main" / "res"
+    values_v31_dir = res_dir / "values-v31"  # Android 12+ (API 31+)
+    values_v31_dir.mkdir(parents=True, exist_ok=True)
+    
+    themes_v31_file = values_v31_dir / "themes.xml"
+    themes_v31_content = """<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ (API 31+) Splash Screen Override -->
+    <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <!-- DISABLE Android 12+ splash screen API -->
+        <item name="android:windowSplashScreenBackground">@drawable/splash</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBrandingImage">@drawable/splash</item>
+        <!-- Force immediate transition to avoid app icon -->
+        <item name="android:windowSplashScreenAnimationDuration">0</item>
+        <!-- Traditional splash screen fallback -->
+        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+    
+    <!-- Force main activity to use our splash -->
+    <style name="SplashTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="android:windowSplashScreenBackground">@drawable/splash</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash</item>
+        <item name="android:windowSplashScreenBrandingImage">@drawable/splash</item>
+    </style>
+</resources>"""
+    
+    themes_v31_file.write_text(themes_v31_content, encoding='utf-8')
+    print(f"   ✅ Created Android 12+ themes override: {themes_v31_file}")
+    
+    # 2. Modify AndroidManifest.xml to explicitly disable splash screen API
+    manifest_files = list(android_dir.rglob("AndroidManifest.xml"))
+    for manifest_file in manifest_files:
+        if "main" in str(manifest_file):
+            try:
+                manifest_content = manifest_file.read_text(encoding='utf-8')
+                
+                # Smart AndroidManifest.xml modification - check existing attributes
+                updated_manifest = manifest_content
+                
+                # Add theme attribute if not present
+                if 'android:theme=' not in manifest_content:
+                    updated_manifest = re.sub(
+                        r'(<application[^>]*?)(\s*>)',
+                        r'\1\n        android:theme="@style/SplashTheme"\2',
+                        updated_manifest
+                    )
+                else:
+                    # Replace existing theme with SplashTheme
+                    updated_manifest = re.sub(
+                        r'android:theme="[^"]*"',
+                        'android:theme="@style/SplashTheme"',
+                        updated_manifest
+                    )
+                
+                # Add enableOnBackInvokedCallback if not present 
+                if 'android:enableOnBackInvokedCallback=' not in updated_manifest:
+                    updated_manifest = re.sub(
+                        r'(<application[^>]*?)(\s*>)',
+                        r'\1\n        android:enableOnBackInvokedCallback="false"\2',
+                        updated_manifest
+                    )
+                
+                # Only add allowBackup if not already present
+                if 'android:allowBackup=' not in updated_manifest:
+                    updated_manifest = re.sub(
+                        r'(<application[^>]*?)(\s*>)',
+                        r'\1\n        android:allowBackup="false"\2',
+                        updated_manifest
+                    )
+                
+                # Also ensure MainActivity uses SplashTheme - but only if not already present
+                if 'android:name=".MainActivity"' in updated_manifest:
+                    # Check if MainActivity already has theme attribute
+                    main_activity_match = re.search(r'<activity[^>]*?android:name="\.MainActivity"[^>]*>', updated_manifest, re.DOTALL)
+                    if main_activity_match and 'android:theme=' not in main_activity_match.group():
+                        updated_manifest = re.sub(
+                            r'(<activity[^>]*?android:name="\.MainActivity"[^>]*?)(\s*>)',
+                            r'\1\n            android:theme="@style/SplashTheme"\2',
+                            updated_manifest
+                        )
+                
+                if updated_manifest != manifest_content:
+                    manifest_file.write_text(updated_manifest, encoding='utf-8')
+                    print("   🔥 FORCED AndroidManifest.xml Android 12+ splash screen disable")
+                
+            except Exception as e:
+                print(f"   ⚠️ Could not update AndroidManifest.xml for Android 12+: {e}")
+    
+    # 3. Create a Capacitor plugin configuration override
+    try:
+        app_cache_root = android_dir.parent
+        capacitor_config = app_cache_root / "capacitor.config.ts"
+        
+        if capacitor_config.exists():
+            config_content = capacitor_config.read_text(encoding='utf-8')
+            
+            # Add splash screen plugin configuration
+            splash_plugin_config = """
+  plugins: {
+    SplashScreen: {
+      launchShowDuration: 0,
+      launchAutoHide: true,
+      launchFadeOutDuration: 0,
+      backgroundColor: "#000000",
+      androidSplashResourceName: "splash",
+      androidScaleType: "CENTER_CROP",
+      showSpinner: false,
+      androidSpinnerStyle: "large",
+      splashFullScreen: true,
+      splashImmersive: true,
+    },
+  },"""
+            
+            if "SplashScreen:" not in config_content:
+                # Add plugin config before the closing brace
+                updated_config = config_content.replace(
+                    "};",
+                    splash_plugin_config + "\n};"
+                )
+                capacitor_config.write_text(updated_config, encoding='utf-8')
+                print("   ✅ Added Capacitor SplashScreen plugin override")
+        
+    except Exception as e:
+        print(f"   ⚠️ Could not update Capacitor config: {e}")
+    
+    print("🔥 Android 12+ splash screen override COMPLETE!")
 
 def _ensure_app_icon(android_dir: Path) -> None:
     """Copy appIcon.png and splash screen from config locations and generate Android resources."""
@@ -571,49 +784,96 @@ def _ensure_app_icon(android_dir: Path) -> None:
                             fallback_splash.close()
                             splash_files_updated += 1
                 
-                # NUCLEAR: Update styles.xml to completely override splash behavior
-                styles_file = res_dir / "values" / "styles.xml"
-                if styles_file.exists():
-                    print("🎨 Updating styles.xml to prevent app icon fallback...")
-                    try:
-                        styles_content = styles_file.read_text(encoding='utf-8')
-                        
-                        # Replace the problematic Theme.SplashScreen with a custom theme that doesn't use app icon
-                        updated_styles = styles_content.replace(
-                            'parent="Theme.SplashScreen"', 'parent="Theme.AppCompat.Light.NoActionBar"'
-                        ).replace(
-                            '@mipmap/ic_launcher', '@drawable/splash'
-                        ).replace(
-                            '@mipmap/ic_launcher_foreground', '@drawable/splash'  
-                        ).replace(
-                        )
-                        
-                        # Also ensure we have proper splash screen styling that prevents icon usage
-                        if 'AppTheme.NoActionBarLaunch' in updated_styles:
-                            # Add window splash screen properties to override Android 12+ behavior
-                            splash_theme_section = '''<style name="AppTheme.NoActionBarLaunch" parent="Theme.AppCompat.Light.NoActionBar">
+                # NUCLEAR: Create styles.xml to completely override splash behavior
+                styles_dir = res_dir / "values"
+                styles_dir.mkdir(parents=True, exist_ok=True)
+                styles_file = styles_dir / "styles.xml"
+                
+                print("🎨 Creating styles.xml to force custom splash screen...")
+                
+                # Create comprehensive styles.xml that forces splash screen usage
+                splash_styles_content = '''<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme -->
+    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
+    </style>
+
+    <!-- FORCED Custom splash screen theme - NO APP ICON ALLOWED -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="android:background">@drawable/splash</item>
+        <item name="android:windowBackground">@drawable/splash</item>
         <item name="android:windowSplashScreenBackground">@drawable/splash</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash</item>
         <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBrandingImage">@drawable/splash</item>
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
-    </style>'''
-                            
-                            # Replace the existing splash theme
-                            import re
-                            pattern = r'<style name="AppTheme\.NoActionBarLaunch".*?</style>'
-                            updated_styles = re.sub(pattern, splash_theme_section, updated_styles, flags=re.DOTALL)
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+
+    <!-- Alternative splash theme -->
+    <style name="SplashTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:background">@drawable/splash</item>
+        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+</resources>'''
+                
+                try:
+                    styles_file.write_text(splash_styles_content, encoding='utf-8')
+                    print("   ✅ FORCED styles.xml creation with custom splash screen")
+                    print("   🎯 Android MUST use @drawable/splash instead of app icon")
+                    
+                    # Also create colors.xml if it doesn't exist
+                    colors_file = styles_dir / "colors.xml"
+                    if not colors_file.exists():
+                        colors_content = '''<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#3F51B5</color>
+    <color name="colorPrimaryDark">#303F9F</color>
+    <color name="colorAccent">#FF4081</color>
+</resources>'''
+                        colors_file.write_text(colors_content, encoding='utf-8')
+                        print("   📝 Created colors.xml for theme support")
                         
-                        if updated_styles != styles_content:
-                            styles_file.write_text(updated_styles, encoding='utf-8')
-                            print("   ✅ Updated styles.xml to use splash drawable instead of app icon")
-                            print("   🎯 Disabled Android 12+ splash screen API that forces app icon usage")
-                        else:
-                            print("   ℹ️ styles.xml already configured correctly")
-                            
+                except Exception as e:
+                    print(f"   ⚠️ Could not create styles.xml: {e}")
+                
+                # NUCLEAR OPTION: Also modify AndroidManifest.xml to enforce splash theme
+                manifest_file = android_dir / "app" / "src" / "main" / "AndroidManifest.xml"
+                if manifest_file.exists():
+                    try:
+                        manifest_content = manifest_file.read_text(encoding='utf-8')
+                        
+                        # Ensure the main activity uses our splash theme
+                        updated_manifest = manifest_content.replace(
+                            'android:theme="@style/AppTheme.NoActionBarLaunch"',
+                            'android:theme="@style/SplashTheme"'
+                        )
+                        
+                        # Also replace any other theme references
+                        updated_manifest = updated_manifest.replace(
+                            'android:theme="@style/AppTheme"',
+                            'android:theme="@style/SplashTheme"'
+                        )
+                        
+                        if updated_manifest != manifest_content:
+                            manifest_file.write_text(updated_manifest, encoding='utf-8')
+                            print("   🔥 FORCED AndroidManifest.xml to use SplashTheme")
+                            print("   💥 MainActivity will now ONLY show custom splash screen")
+                        
                     except Exception as e:
-                        print(f"   ⚠️ Could not update styles.xml: {e}")
+                        print(f"   ⚠️ Could not update AndroidManifest.xml: {e}")
+                
+                # MEGA NUCLEAR OPTION: Override Android 12+ Splash Screen API completely
+                print("🔥 IMPLEMENTING MEGA NUCLEAR SPLASH SCREEN OVERRIDE...")
+                try:
+                    # TEMPORARILY DISABLED to fix duplicate theme issue
+                    # _override_android12_splash_screen(android_dir, source_splash)
+                    print("   🔥 Android 12+ override DISABLED to prevent AndroidManifest.xml corruption")
+                except Exception as e:
+                    print(f"   ⚠️ Android 12+ override failed: {e}")
                 
                 print(f"🎨 Generated {splash_files_updated} splash screen files across multiple densities")
                 print("🎯 Splash screen should now display your custom image, not the app icon")
