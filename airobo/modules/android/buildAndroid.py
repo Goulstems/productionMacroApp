@@ -293,25 +293,19 @@ def _ensure_app_icon(android_dir: Path) -> None:
     """Copy appIcon.png and splash screen from config locations and generate Android resources."""
     print("🔍 Looking for app icon and splash screen...")
     
-    # Look for appIcon - prioritize SVG vectors for perfect quality!
+    # Look for appIcon.png in known config locations - SIMPLE PNG ONLY
     icon_candidates = [
         os.environ.get("AIROBO_APP_ICON_PATH"),
-        r"C:\airoboConfigs\appIcon.svg",     # 🎯 SVG FIRST for vector quality!
         r"C:\airoboConfigs\appIcon.png",
-        r"C:\airobo\appIcon.svg",
         r"C:\airobo\appIcon.png",
-        os.path.expanduser("~/airoboConfigs/appIcon.svg"),
         os.path.expanduser("~/airoboConfigs/appIcon.png"),
     ]
     
-    # Look for splash screen - prioritize SVG vectors!
+    # Look for splash screen - SIMPLE PNG ONLY
     splash_candidates = [
         os.environ.get("AIROBO_SPLASH_PATH"),
-        r"C:\airoboConfigs\splash.svg",      # 🎯 SVG FIRST for vector quality!
         r"C:\airoboConfigs\splash.png",
-        r"C:\airobo\splash.svg",
-        r"C:\airobo\splash.png",
-        os.path.expanduser("~/airoboConfigs/splash.svg"),
+        r"C:\airobo\splash.png", 
         os.path.expanduser("~/airoboConfigs/splash.png"),
     ]
     
@@ -360,6 +354,7 @@ def _ensure_app_icon(android_dir: Path) -> None:
         "mipmap-xhdpi": 192,     # Was 128, now 2x higher  
         "mipmap-xxhdpi": 288,    # Was 192, now 2x higher
         "mipmap-xxxhdpi": 384,   # Was 256, now 2x higher - ULTRA crisp!
+        "mipmap-anydpi-v26": 384, # For adaptive icon XML
     }
     
     res_dir = android_dir / "app" / "src" / "main" / "res"
@@ -370,55 +365,34 @@ def _ensure_app_icon(android_dir: Path) -> None:
         from PIL import Image
         print("📦 Pillow loaded successfully")
         
-        # Check if we need to handle SVG files
-        is_svg_icon = source_icon and source_icon.suffix.lower() == '.svg'
-        is_svg_splash = source_splash and source_splash.suffix.lower() == '.svg'
-        
-        if is_svg_icon or is_svg_splash:
-            try:
-                import cairosvg
-                print("🎨 CairoSVG loaded for vector processing")
-            except ImportError:
-                print("⚠️ CairoSVG not installed. Installing for SVG processing...")
-                import subprocess
-                subprocess.run([
-                    "pip", "install", "cairosvg"
-                ], check=True, capture_output=True)
-                import cairosvg
-                print("✅ CairoSVG installed successfully")
+        # Simple PNG processing - no SVG complexity
         
         def load_icon_at_size(size):
-            """Load icon at specified size, handling both PNG and SVG"""
-            if is_svg_icon:
-                # Convert SVG to PNG at exact size for perfect quality
-                import io
-                png_data = cairosvg.svg2png(
-                    url=str(source_icon), 
-                    output_width=size, 
-                    output_height=size
-                )
-                return Image.open(io.BytesIO(png_data))
-            else:
-                # Load PNG and resize
-                with Image.open(source_icon) as img:
-                    # Convert to RGBA if needed
-                    if img.mode != 'RGBA':
-                        img = img.convert('RGBA')
-                    return img.resize((size, size), Image.Resampling.LANCZOS)
-        
-        # Load source image for initial processing
-        if is_svg_icon:
-            # For SVG, load at a reasonable preview size
-            with load_icon_at_size(512) as img:
-                print(f"🎨 Vector icon loaded: {img.size[0]}x{img.size[1]} pixels (from SVG)")
-        else:
+            """Load icon at specified size - PNG ONLY with proper transparency"""
             with Image.open(source_icon) as img:
-                print(f"🖼️ Source image: {img.size[0]}x{img.size[1]} pixels, mode: {img.mode}")
-                
-                # Convert to RGBA if needed for transparency support
+                # Force RGBA mode for proper transparency
                 if img.mode != 'RGBA':
                     img = img.convert('RGBA')
-                    print("🔄 Converted to RGBA mode")
+                
+                # Create a new transparent image at target size
+                result = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+                
+                # Resize the source image maintaining aspect ratio
+                img_resized = img.resize((size, size), Image.Resampling.LANCZOS)
+                
+                # Paste onto transparent background (no white ring!)
+                result.paste(img_resized, (0, 0), img_resized)
+                
+                return result
+        
+        # Load source image for initial processing
+        with Image.open(source_icon) as img:
+            print(f"🖼️ Source image: {img.size[0]}x{img.size[1]} pixels, mode: {img.mode}")
+            
+            # Convert to RGBA if needed for transparency support
+            if img.mode != 'RGBA':
+                img = img.convert('RGBA')
+                print("🔄 Converted to RGBA mode")
             
             # FIRST: Replace web icons that Capacitor might use as source
             web_icons_updated = 0
@@ -460,6 +434,26 @@ def _ensure_app_icon(android_dir: Path) -> None:
                 density_dir = res_dir / density
                 density_dir.mkdir(parents=True, exist_ok=True)
                 
+                # Skip PNG generation for anydpi-v26 (only XML files there)
+                if density == "mipmap-anydpi-v26":
+                    # ONLY create adaptive icon XML to prevent white background
+                    adaptive_xml_content = '''<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@android:color/transparent"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+</adaptive-icon>'''
+                    adaptive_xml_path = density_dir / "ic_launcher.xml"
+                    adaptive_xml_path.write_text(adaptive_xml_content, encoding='utf-8')
+                    
+                    # Round variant
+                    round_xml_path = density_dir / "ic_launcher_round.xml"
+                    round_xml_path.write_text(adaptive_xml_content, encoding='utf-8')
+                    
+                    print(f"   🎯 Adaptive XML: {adaptive_xml_path}")
+                    print(f"   🎯 Round XML: {round_xml_path}")
+                    icons_created += 2
+                    continue
+                
                 # For adaptive icons, we need larger foreground images (108dp safe area)
                 # The visible area is ~72dp, but we need 108dp for the full adaptive icon
                 adaptive_size = int(size * 1.5)  # 1.5x for 108dp vs 72dp
@@ -490,43 +484,27 @@ def _ensure_app_icon(android_dir: Path) -> None:
             
             # SPLASH SCREENS: Replace all splash screens if splash image is provided
             if source_splash:
-                print(f"🎨 Updating splash screens with proper densities...")
-                print(f"   🎨 Processing {'SVG vector' if is_svg_splash else 'PNG raster'} splash...")
+                print(f"🎨 Updating splash screens - SIMPLE PNG PROCESSING...")
                 splash_files_updated = 0
                 
                 def load_splash_at_size(width, height):
-                    """Load splash at specified size, handling both PNG and SVG"""
-                    if is_svg_splash:
-                        # Convert SVG to PNG at exact size for perfect quality
-                        import io
-                        png_data = cairosvg.svg2png(
-                            url=str(source_splash), 
-                            output_width=width, 
-                            output_height=height
-                        )
-                        return Image.open(io.BytesIO(png_data))
-                    else:
-                        # Load PNG and resize
-                        with Image.open(source_splash) as splash_img:
-                            return splash_img.resize((width, height), Image.Resampling.LANCZOS)
-                
-                # Get source dimensions for logging
-                if is_svg_splash:
-                    print(f"   📏 Vector splash: scalable SVG")
-                else:
+                    """Load splash at specified size - PNG ONLY"""
                     with Image.open(source_splash) as splash_img:
-                        print(f"   📏 Source splash: {splash_img.size[0]}x{splash_img.size[1]}")
+                        return splash_img.resize((width, height), Image.Resampling.LANCZOS)
                 
-                # FIRST: Create main splash drawable in drawable folder (not density-specific)
+                # Get source dimensions
+                with Image.open(source_splash) as splash_img:
+                    print(f"   📏 Source splash: {splash_img.size[0]}x{splash_img.size[1]}")
+                
+                # CRITICAL: Replace the main splash drawable directly
                 main_drawable_dir = res_dir / "drawable"
                 main_drawable_dir.mkdir(parents=True, exist_ok=True)
                 main_splash_path = main_drawable_dir / "splash.png"
                 
-                # Create high-quality main splash
-                main_splash = load_splash_at_size(1080, 1920)  # Standard FHD resolution
-                main_splash.save(main_splash_path, "PNG", optimize=False, compress_level=1)
-                print(f"   🎯 Main splash: 1080x1920 -> {main_splash_path}")
-                main_splash.close()
+                # Copy the source splash directly - no resizing for main drawable
+                with Image.open(source_splash) as splash_img:
+                    splash_img.save(main_splash_path, "PNG", optimize=False, compress_level=1)
+                    print(f"   🎯 Main splash: {splash_img.size[0]}x{splash_img.size[1]} -> {main_splash_path}")
                 splash_files_updated += 1
                 
                 # Standard splash screen sizes for different densities
@@ -577,7 +555,23 @@ def _ensure_app_icon(android_dir: Path) -> None:
                             splash_files_updated += 1
                             default_splash.close()
                 
-                # CRITICAL: Update styles.xml to ensure splash screen uses our image, not app icon
+                # AGGRESSIVE: Also replace any files that might be used as splash fallbacks
+                potential_splash_files = [
+                    "splash_screen.png", "launch_screen.png", "startup.png", 
+                    "background.png", "launch_background.png"
+                ]
+                for filename in potential_splash_files:
+                    for density_folder in ["drawable", "drawable-hdpi", "drawable-xhdpi", "drawable-xxhdpi"]:
+                        potential_path = res_dir / density_folder / filename
+                        if potential_path.parent.exists():
+                            potential_path.parent.mkdir(parents=True, exist_ok=True)
+                            fallback_splash = load_splash_at_size(1080, 1920)
+                            fallback_splash.save(potential_path, "PNG", optimize=False, compress_level=1)
+                            print(f"   🎯 Created fallback: {potential_path}")
+                            fallback_splash.close()
+                            splash_files_updated += 1
+                
+                # NUCLEAR: Update styles.xml to completely override splash behavior
                 styles_file = res_dir / "values" / "styles.xml"
                 if styles_file.exists():
                     print("🎨 Updating styles.xml to prevent app icon fallback...")
