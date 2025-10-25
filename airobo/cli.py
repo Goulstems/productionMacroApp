@@ -5,6 +5,7 @@ CLI for the airobo tool.
 """
 import argparse
 from airobo.api import publish, version
+from airobo.utils.env import load_env_from_known_locations
 
 commands = {
     "publish": publish,
@@ -15,6 +16,21 @@ commands = {
 #---------------------------------------------------------------------------------------------------------
 
 def main():
+    # Load env vars from common locations (won't override pre-set env)
+    # This lets users keep C:\airoboEnv or ~/airoboEnv instead of a local .env
+    # Load repo and signing env vars from known locations
+    load_env_from_known_locations(verbose=False, keys=(
+        "gitURL", "gitBranch",
+        # Android signing
+        "AIROBO_SIGN_STORE_FILE",
+        "AIROBO_SIGN_STORE_PASSWORD",
+        "AIROBO_SIGN_STORE_TYPE",
+        "AIROBO_SIGN_KEY_ALIAS",
+        "AIROBO_SIGN_KEY_PASSWORD",
+        # common fallbacks
+        "STORE_PASSWORD",
+        "KEY_PASSWORD",
+    ))
     parser = argparse.ArgumentParser(prog='airobo')
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 

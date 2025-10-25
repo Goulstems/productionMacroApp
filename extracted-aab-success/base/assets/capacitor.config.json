@@ -1,0 +1,8 @@
+{
+	"appId": "com.aiarobo.app",
+	"appName": "AI & Robotics Academy",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https"
+	}
+}

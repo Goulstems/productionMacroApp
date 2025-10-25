@@ -62,53 +62,89 @@ def get_app_cache_info():
 
 def get_repo_url_from_env():
     """
-    Read the repository URL from .env file
-    
+    Resolve repo URL/branch from (in order):
+      1) Process environment (gitURL, gitBranch)
+      2) Env files searched upward from CWD: .env or airoboEnv
+      3) If gitURL contains '/tree/<branch>', split into repo + branch
+
     Returns:
         tuple: (repo_url, branch) or (None, None) if not found
     """
     try:
-        # Look for .env file in current directory and parent directories
+        # 1) Check already-set environment variables (preferred)
+        env_repo = os.environ.get('gitURL')
+        env_branch = os.environ.get('gitBranch') or 'main'
+        if env_repo:
+            repo_url = env_repo
+            branch = env_branch
+            if '/tree/' in repo_url:
+                parts = repo_url.split('/tree/')
+                repo_url = parts[0]
+                if len(parts) > 1 and parts[1]:
+                    branch = parts[1]
+            if not repo_url.endswith('.git'):
+                repo_url += '.git'
+            return repo_url, branch
+
+        # 2) Look for .env or airoboEnv file in current and parent directories
         current_dir = Path.cwd()
         env_file = None
-        
-        # Search up the directory tree for .env file
         for parent in [current_dir] + list(current_dir.parents):
-            potential_env = parent / '.env'
-            if potential_env.exists():
-                env_file = potential_env
+            for name in ('.env', 'airoboEnv'):
+                potential = parent / name
+                if potential.exists():
+                    env_file = potential
+                    break
+            if env_file:
                 break
-        
+
+        # 2b) If not found, scan system root common locations (e.g., C:\airobo)
+        if not env_file:
+            try:
+                sys_drive = os.environ.get('SystemDrive', 'C:')
+                root = Path(sys_drive + "\\")
+                candidates = [
+                    root / 'airobo' / 'airoboEnv',
+                    root / 'airobo' / 'airoboEnv.env',
+                    root / 'airoboEnv',
+                    root / 'airoboEnv.env',
+                ]
+                for p in candidates:
+                    if p.exists():
+                        env_file = p
+                        break
+            except Exception:
+                pass
+
         if not env_file:
             return None, None
-            
-        # Read .env file and extract gitURL
-        with open(env_file, 'r') as f:
+
+        with open(env_file, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
                 if line.startswith('gitURL='):
                     original_url = line.split('=', 1)[1].strip()
-                    
-                    # Extract branch if it contains /tree/
-                    branch = "main"  # default branch
+                    branch = 'main'
                     repo_url = original_url
-                    
                     if '/tree/' in original_url:
                         parts = original_url.split('/tree/')
                         repo_url = parts[0]
                         if len(parts) > 1:
                             branch = parts[1]
-                    
-                    # Ensure it ends with .git for proper cloning
                     if not repo_url.endswith('.git'):
                         repo_url += '.git'
-                    
                     return repo_url, branch
-                    
+
+                if line.startswith('gitBranch='):
+                    # Will be used only if gitURL appears later in the file
+                    env_branch = line.split('=', 1)[1].strip()
+
         return None, None
-        
+
     except Exception as e:
-        print(f"⚠️ Error reading .env file: {e}")
+        print(f"⚠️ Error resolving repo from env: {e}")
         return None, None
 
 
