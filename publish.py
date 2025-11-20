@@ -118,14 +118,19 @@ def main():
         
         # Upload to PyPI
         print("📤 Uploading to PyPI...")
+        
+        # Set environment variable for twine
+        env = os.environ.copy()
+        env['TWINE_USERNAME'] = '__token__'
+        env['TWINE_PASSWORD'] = pypi_token
+        
         result = subprocess.run([
-            'twine', 'upload', f'dist/*',
-            '--username', '__token__',
-            '--password', pypi_token
-        ], capture_output=True, text=True)
+            'twine', 'upload', 'dist/*'
+        ], capture_output=True, text=True, env=env)
         
         if result.returncode != 0:
             print(f"❌ Upload failed: {result.stderr}")
+            print(f"Output: {result.stdout}")
             input("Press Enter to exit...")
             return
         

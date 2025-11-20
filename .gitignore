@@ -90,9 +90,39 @@ version.txt
 
 # API keys and secrets (extra protection)
 *secret*
-*key*
-*token*
-*password*
 *credential*
-config.json
-secrets.json
+*.keystore
+*.jks
+*.p12
+signing.properties
+key.properties
+
+# Google Play service account
+*service-account*.json
+google-credentials*.json
+
+# Android build outputs
+android/app/build/
+android/app/release/
+android/.gradle/
+*.aab
+*.apk
+
+# Config directories (if they contain sensitive data)
+# airoboConfigs/ - uncomment if needed
+
+# Node modules (if using Capacitor)
+node_modules/
+
+# Capacitor
+.capacitor/
+android/.idea/
+android/local.properties
+ios/App/Pods/
+ios/App/App.xcworkspace/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+airobo.egg-info/
