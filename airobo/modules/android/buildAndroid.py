@@ -9,6 +9,7 @@ import platform
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import re
+import json
 from airobo.modules.capacitorMacro import prepare_capacitor_app, sync_platform
 
 
@@ -226,6 +227,11 @@ def build_android_bundle(app_path):
     print(f"✅ Android App Bundle built successfully!")
     print(f"📱 Version: {version_label}")
     print(f"📦 Output: {final_aab_path}")
+    
+    # Check if auto-publish is enabled
+    if os.environ.get("AIROBO_AUTO_PUBLISH") == "true":
+        print("\n📤 Auto-publish enabled, uploading to Google Play...")
+        upload_to_google_play(final_aab_path, app_path)
     
     return final_aab_path
 
@@ -1265,6 +1271,136 @@ def _maybe_warn_on_alias(store_file: str, store_password: str, expected_alias: s
             aliases.append(line.split(":", 1)[1].strip())
     if aliases and expected_alias not in aliases:
         print(f"⚠️ Keystore alias '{expected_alias}' not found. Available aliases: {', '.join(aliases)}")
+
+
+def upload_to_google_play(aab_path: str, app_path: str) -> bool:
+    """
+    Upload AAB to Google Play Console using the Google Play Developer API
+    
+    Args:
+        aab_path: Path to the signed AAB file
+        app_path: Path to the app source (to find config)
+        
+    Returns:
+        bool: True if upload succeeded, False otherwise
+        
+    Environment variables required:
+        - GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: Path to service account JSON credentials
+        - GOOGLE_PLAY_PACKAGE_NAME: Android package name (e.g., com.example.app)
+        - GOOGLE_PLAY_TRACK: Release track (default: internal)
+    """
+    try:
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaFileUpload
+        from google.oauth2 import service_account
+    except ImportError:
+        print("❌ Google Play API client not installed. Install with:")
+        print("   pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
+        return False
+    
+    # Get configuration from environment
+    service_account_json = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON")
+    package_name = os.environ.get("GOOGLE_PLAY_PACKAGE_NAME")
+    track = os.environ.get("GOOGLE_PLAY_TRACK", "internal")
+    
+    if not service_account_json:
+        print("❌ GOOGLE_PLAY_SERVICE_ACCOUNT_JSON environment variable not set")
+        print("   Set it to the path of your service account JSON file")
+        return False
+    
+    if not package_name:
+        print("❌ GOOGLE_PLAY_PACKAGE_NAME environment variable not set")
+        print("   Set it to your app's package name (e.g., com.example.app)")
+        return False
+    
+    if not os.path.exists(service_account_json):
+        print(f"❌ Service account JSON file not found: {service_account_json}")
+        return False
+    
+    if not os.path.exists(aab_path):
+        print(f"❌ AAB file not found: {aab_path}")
+        return False
+    
+    try:
+        print(f"🔐 Authenticating with Google Play API...")
+        
+        # Authenticate
+        SCOPES = ['https://www.googleapis.com/auth/androidpublisher']
+        credentials = service_account.Credentials.from_service_account_file(
+            service_account_json,
+            scopes=SCOPES
+        )
+        
+        # Build the service
+        service = build('androidpublisher', 'v3', credentials=credentials)
+        
+        print(f"📝 Creating new edit for package: {package_name}")
+        
+        # Create an edit
+        edit_request = service.edits().insert(
+            body={},
+            packageName=package_name
+        )
+        edit_response = edit_request.execute()
+        edit_id = edit_response['id']
+        
+        print(f"📤 Uploading AAB file...")
+        
+        # Upload the AAB
+        media = MediaFileUpload(
+            aab_path,
+            mimetype='application/octet-stream',
+            resumable=True
+        )
+        
+        bundle_response = service.edits().bundles().upload(
+            editId=edit_id,
+            packageName=package_name,
+            media_body=media
+        ).execute()
+        
+        version_code = bundle_response.get('versionCode')
+        print(f"✅ AAB uploaded successfully (version code: {version_code})")
+        
+        # Assign to track
+        print(f"🎯 Assigning to track: {track}")
+        
+        track_response = service.edits().tracks().update(
+            editId=edit_id,
+            track=track,
+            packageName=package_name,
+            body={
+                'releases': [{
+                    'versionCodes': [version_code],
+                    'status': 'completed',
+                }]
+            }
+        ).execute()
+        
+        print(f"✅ Assigned to {track} track")
+        
+        # Commit the edit
+        print(f"💾 Committing changes...")
+        
+        commit_request = service.edits().commit(
+            editId=edit_id,
+            packageName=package_name
+        )
+        commit_request.execute()
+        
+        print(f"🎉 Successfully published to Google Play Console!")
+        print(f"   Package: {package_name}")
+        print(f"   Track: {track}")
+        print(f"   Version: {version_code}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to upload to Google Play: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 
 
 
